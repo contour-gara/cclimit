@@ -1,0 +1,9 @@
+[tools]
+cargo-release = "1.1.6"
+rust = "1.99.0"
+
+[tasks]
+test = "cargo test"
+lint = "cargo fmt --check && cargo clippy --all-targets -- -D warnings"
+live = "cargo test -- --ignored"
+release = "cargo release {{arg(name='level', default='patch')}} --execute"
