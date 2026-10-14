@@ -10,7 +10,10 @@ permissions:
 
 jobs:
   check:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2

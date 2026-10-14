@@ -17,13 +17,14 @@ Claude Code の利用上限には、5 時間の枠、7 日の枠、モデル別�
 - 常駐せず、ファイルも書きません。1 回の実行で 1 回の HTTPS リクエストを送って終わります。
 - 出力はプレーンテキストの 1 行だけです。色や記号は呼び出し側で付けられます。
 - 失敗の仕方が決まっています。一時的な失敗では標準出力が空になるので、呼び出し側は前回の値を使い続けられます。
-- 単一バイナリです。macOS 標準の `security` コマンド以外に実行時の依存はありません。
+- 単一バイナリです。macOS では標準の `security` コマンドで Keychain を読みます。
 
 ## 動作環境
 
 - macOS。Apple Silicon と Intel 向けのバイナリを配布します。
-- claude.ai の Pro または Max サブスクリプションで Claude Code にログインしていること。
-- Linux は未検証です。Linux では認証情報を `~/.claude/.credentials.json` からだけ読みます。
+- Ubuntu などの Linux。x86_64 向けのバイナリを配布します。認証情報は `~/.claude/.credentials.json` から読みます。
+
+どちらの OS でも、claude.ai の Pro または Max サブスクリプションで Claude Code にログインしている必要があります。
 
 ## インストール
 
@@ -83,7 +84,7 @@ api: HTTP 200, limits 5h, 7d, fable
 
 ## 仕組み
 
-認証情報は、macOS では Keychain の `Claude Code-credentials` を `security` コマンドで読みます。読めなければ `~/.claude/.credentials.json` を読みます。トークンの再発行はしません。期限が切れていたら `cclimit: login required` を出し、Claude Code 側でのログインに任せます。
+認証情報は、macOS では Keychain の `Claude Code-credentials` を `security` コマンドで読みます。読めなければ `~/.claude/.credentials.json` を読みます。Linux では最初から `~/.claude/.credentials.json` を読みます。トークンの再発行はしません。期限が切れていたら `cclimit: login required` を出し、Claude Code 側でのログインに任せます。
 
 使用率は claude.ai の非公開 API `GET https://api.anthropic.com/api/oauth/usage` から取ります。公式に文書化された API ではないので、予告なく変わる可能性があります。応答に知らない項目があっても無視し、既知の枠が 1 つも無いときだけ失敗にします。
 
@@ -123,7 +124,7 @@ mise run live   # 本物の Keychain と API を使うテスト
 
 結合テストは実際のバイナリを起動し、HTTP は httpmock、認証情報は一時ファイル、時刻は `CCLIMIT_NOW` で差し替えます。
 
-CI はプルリクエストと main への push で lint と test を実行します。`mise run release` を実行すると版が上がり、タグが push されます。タグを受けて GitHub Actions が macOS 向けバイナリをビルドし、Releases に添付します。
+CI はプルリクエストと main への push で、macOS と Ubuntu の両方で lint と test を実行します。`mise run release` を実行すると版が上がり、タグが push されます。タグを受けて GitHub Actions が macOS と Linux 向けのバイナリをビルドし、Releases に添付します。
 
 保守は [contour-gara](https://github.com/contour-gara) が行っています。不具合や要望は [Issues](https://github.com/contour-gara/cclimit/issues) に書いてください。
 
