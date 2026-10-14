@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  create-release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - name: Check version matches tag
+        run: |
+          version="$(mise exec -- cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          if [ "$version" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "Cargo.toml version $version does not match tag $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  upload:
+    needs: create-release
+    strategy:
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: cclimit
+          target: ${{ matrix.target }}
+          tar: unix
+          zip: none
+          checksum: sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  attest:
+    needs: upload
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download release archives
+        run: gh release download "$GITHUB_REF_NAME" -p '*.tar.gz' -R "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: '*.tar.gz'
