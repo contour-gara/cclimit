@@ -4,7 +4,7 @@ mod config;
 mod credentials;
 mod render;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use api::Limits;
 use clap::Parser;
 use cli::{Cli, Command};
@@ -32,6 +32,7 @@ fn try_main() -> Result<()> {
 }
 
 enum Failure {
+    TokenExpired,
     LoginRequired(anyhow::Error),
     Transient(anyhow::Error),
 }
@@ -42,6 +43,10 @@ fn run(config: &Config) -> Result<()> {
         .and_then(|(_, credentials)| fetch_limits(config, &credentials));
     match limits {
         Ok(limits) => println!("{}", render::render(&limits, config.now)),
+        Err(Failure::TokenExpired) => {
+            eprintln!("cclimit: access token expired, start Claude Code to refresh it");
+            println!("cclimit: token expired");
+        }
         Err(Failure::LoginRequired(e)) => {
             eprintln!("cclimit: {e:#}");
             println!("cclimit: login required");
@@ -53,7 +58,7 @@ fn run(config: &Config) -> Result<()> {
 
 fn fetch_limits(config: &Config, credentials: &Credentials) -> Result<Limits, Failure> {
     if credentials.is_expired(config.now) {
-        return Err(Failure::LoginRequired(anyhow!("access token expired")));
+        return Err(Failure::TokenExpired);
     }
     api::fetch(&config.api_base, credentials.access_token()).map_err(|e| match e {
         api::Error::Unauthorized(_) => Failure::LoginRequired(e.into()),
@@ -86,6 +91,7 @@ fn doctor(config: &Config) -> Result<()> {
             let labels: Vec<_> = limits.iter().map(|l| l.label()).collect();
             format!("HTTP 200, limits {}", labels.join(", "))
         }
+        Err(Failure::TokenExpired) => "skipped, access token expired".to_string(),
         Err(Failure::LoginRequired(e) | Failure::Transient(e)) => format!("{e:#}"),
     };
     println!("api: {api}");

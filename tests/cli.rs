@@ -34,11 +34,14 @@ fn server_error_prints_nothing_and_fails() {
 }
 
 #[test]
-fn expired_token_prints_login_required() {
+fn expired_token_prints_token_expired() {
     let h = Harness::new();
     h.given_credentials(1_760_000_000_000);
 
-    h.run(&[]).success().stdout("cclimit: login required\n");
+    h.run(&[])
+        .success()
+        .stdout("cclimit: token expired\n")
+        .stderr("cclimit: access token expired, start Claude Code to refresh it\n");
 }
 
 #[test]
@@ -74,4 +77,18 @@ fn doctor_reports_sources_without_tokens() {
             .and(contains("test-token").not())
             .and(contains("test-refresh").not()),
     );
+}
+
+#[test]
+fn doctor_with_expired_token_skips_the_api() {
+    let h = Harness::new();
+    h.given_credentials(1_760_000_000_000);
+
+    h.run(&["doctor"])
+        .success()
+        .stdout(
+            contains("credentials: env, expired ")
+                .and(contains("api: skipped, access token expired")),
+        )
+        .stderr("");
 }

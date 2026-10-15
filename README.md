@@ -14,7 +14,7 @@ Claude Code の利用上限には、5 時間の枠、7 日の枠、モデル別�
 ## 特徴
 
 - 設定不要。Claude Code にログイン済みなら、Claude Code が保存した認証情報を読んで動きます。
-- 常駐せず、ファイルも書きません。1 回の実行で 1 回の HTTPS リクエストを送って終わります。
+- 常駐せず、ファイルも書きません。1 回の実行で送る HTTPS リクエストは多くても 1 回です。
 - 出力はプレーンテキストの 1 行だけです。色や記号は呼び出し側で付けられます。
 - 失敗の仕方が決まっています。一時的な失敗では標準出力が空になるので、呼び出し側は前回の値を使い続けられます。
 - 単一バイナリです。macOS では標準の `security` コマンドで Keychain を読みます。
@@ -67,10 +67,11 @@ mise exec -- cargo build --release
 | 結果 | 標準出力 | 終了コード |
 |---|---|---|
 | 取得できた | 使用率の 1 行 | 0 |
+| トークンの期限切れ | `cclimit: token expired` | 0 |
 | ログインし直すべき状態 | `cclimit: login required` | 0 |
 | 一時的な失敗 | 空 | 1 |
 
-ログインし直すべき状態とは、認証情報が無いか読めない、トークンが期限切れ、API が 401 か 403 を返した場合です。一時的な失敗とは、通信の失敗、5 秒のタイムアウト超過、200、401、403 のいずれでもない HTTP ステータス、読めない応答、枠が 1 つも読み取れない応答です。どちらの場合も理由を標準エラーに 1 行書きます。
+トークンの期限切れとは、認証情報に期限が記録されていて、現在時刻がそれ以降である状態です。ログインし直すべき状態とは、認証情報が無いか読めない、または API が 401 か 403 を返した場合です。一時的な失敗とは、通信の失敗、5 秒のタイムアウト超過、200、401、403 のいずれでもない HTTP ステータス、読めない応答、枠が 1 つも読み取れない応答です。どの場合も理由を標準エラーに 1 行書きます。
 
 ### 診断する
 
@@ -84,15 +85,19 @@ api: HTTP 200, limits 5h, 7d, fable
 
 ## 仕組み
 
-認証情報は、macOS では Keychain の `Claude Code-credentials` を `security` コマンドで読みます。読めなければ `~/.claude/.credentials.json` を読みます。Linux では最初から `~/.claude/.credentials.json` を読みます。トークンの再発行はしません。期限が切れていたら `cclimit: login required` を出し、Claude Code 側でのログインに任せます。
+認証情報は、macOS では Keychain の `Claude Code-credentials` を `security` コマンドで読みます。読めなければ `~/.claude/.credentials.json` を読みます。Linux では最初から `~/.claude/.credentials.json` を読みます。アクセストークンには期限があり、cclimit は期限を過ぎたトークンを使いません。期限切れなら `cclimit: token expired` を出し、更新は Claude Code の起動時の処理に任せます。トークンの再発行はしません。
 
 使用率は claude.ai の非公開 API `GET https://api.anthropic.com/api/oauth/usage` から取ります。公式に文書化された API ではないので、予告なく変わる可能性があります。応答に知らない項目があっても無視し、既知の枠が 1 つも無いときだけ失敗にします。
 
 ## トラブルシューティング
 
+### `cclimit: token expired` と表示される
+
+アクセストークンの期限が切れています。Claude Code を起動してトークンが更新されたあとに実行し直してください。`cclimit doctor` の `credentials:` 行で期限を確認できます。
+
 ### `cclimit: login required` と表示される
 
-Claude Code で `/login` を実行してログインし直してください。`cclimit doctor` で、認証情報がどこから読まれ、いつ期限が切れるかを確認できます。
+Claude Code で `/login` を実行してログインし直してください。`cclimit doctor` で、認証情報がどこから読まれたかを確認できます。
 
 ### 何も表示されず終了コードが 1 になる
 
