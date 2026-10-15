@@ -1,22 +1,71 @@
+use crate::credentials::AccessToken;
 use jiff::Timestamp;
 use serde::Deserialize;
 use std::fmt;
+use std::ops::Deref;
 use std::time::Duration;
 
 #[derive(Debug, PartialEq)]
 pub struct Limit {
-    pub label: String,
-    pub percent: u32,
-    pub resets_at: Option<Timestamp>,
+    label: String,
+    percent: u32,
+    resets_at: Option<Timestamp>,
+}
+
+impl Limit {
+    pub fn new(label: String, percent: u32, resets_at: Option<Timestamp>) -> Limit {
+        assert!(
+            !label.is_empty() && label.chars().all(is_label_char),
+            "limit label must be non-empty lowercase ASCII alphanumerics"
+        );
+        Limit {
+            label,
+            percent,
+            resets_at,
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn percent(&self) -> u32 {
+        self.percent
+    }
+
+    pub fn resets_at(&self) -> Option<Timestamp> {
+        self.resets_at
+    }
+}
+
+fn is_label_char(c: char) -> bool {
+    c.is_ascii_lowercase() || c.is_ascii_digit()
+}
+
+#[derive(Debug)]
+pub struct Limits(Vec<Limit>);
+
+impl Limits {
+    pub fn new(limits: Vec<Limit>) -> Option<Limits> {
+        (!limits.is_empty()).then_some(Limits(limits))
+    }
+}
+
+impl Deref for Limits {
+    type Target = [Limit];
+
+    fn deref(&self) -> &[Limit] {
+        &self.0
+    }
 }
 
 #[cfg(test)]
 pub(crate) fn limit(label: &str, percent: u32, resets_at: Option<&str>) -> Limit {
-    Limit {
-        label: label.to_string(),
+    Limit::new(
+        label.to_string(),
         percent,
-        resets_at: resets_at.map(|s| s.parse().unwrap()),
-    }
+        resets_at.map(|s| s.parse().unwrap()),
+    )
 }
 
 #[derive(Deserialize)]
@@ -73,7 +122,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-pub fn fetch(api_base: &str, token: &str) -> Result<Vec<Limit>, Error> {
+pub fn fetch(api_base: &str, token: &AccessToken) -> Result<Limits, Error> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         // Not ureq's default of no timeout: a status bar calling this waits for the answer
         .timeout_global(Some(Duration::from_secs(5)))
@@ -84,7 +133,7 @@ pub fn fetch(api_base: &str, token: &str) -> Result<Vec<Limit>, Error> {
         .into();
     let mut response = agent
         .get(format!("{api_base}/api/oauth/usage"))
-        .header("Authorization", format!("Bearer {token}"))
+        .header("Authorization", format!("Bearer {}", token.as_str()))
         .header("anthropic-beta", "oauth-2025-04-20")
         .call()
         .map_err(Error::Transport)?;
@@ -100,7 +149,7 @@ pub fn fetch(api_base: &str, token: &str) -> Result<Vec<Limit>, Error> {
     }
 }
 
-fn parse(body: &str) -> Result<Vec<Limit>, Error> {
+fn parse(body: &str) -> Result<Limits, Error> {
     let usage: Usage = serde_json::from_str(body).map_err(|_| Error::Body)?;
     let mut limits: Vec<Limit> = usage
         .limits
@@ -113,18 +162,15 @@ fn parse(body: &str) -> Result<Vec<Limit>, Error> {
             .into_iter()
             .filter_map(|(label, window)| {
                 let window = window?;
-                Some(new_limit(
+                Some(Limit::new(
                     label.to_string(),
-                    window.utilization?,
+                    percent(window.utilization?)?,
                     window.resets_at,
                 ))
             })
             .collect();
     }
-    if limits.is_empty() {
-        return Err(Error::NoLimits);
-    }
-    Ok(limits)
+    Limits::new(limits).ok_or(Error::NoLimits)
 }
 
 fn normalize(raw: RawLimit) -> Option<Limit> {
@@ -134,7 +180,7 @@ fn normalize(raw: RawLimit) -> Option<Limit> {
         "weekly_scoped" => scoped_label(raw.scope.and_then(|scope| scope.model?.display_name)),
         _ => return None,
     };
-    Some(new_limit(label, raw.percent?, raw.resets_at))
+    Some(Limit::new(label, percent(raw.percent?)?, raw.resets_at))
 }
 
 fn scoped_label(display_name: Option<String>) -> String {
@@ -142,7 +188,7 @@ fn scoped_label(display_name: Option<String>) -> String {
         .unwrap_or_default()
         .to_lowercase()
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
+        .filter(|&c| is_label_char(c))
         .collect();
     if label.is_empty() {
         "scoped".to_string()
@@ -151,12 +197,8 @@ fn scoped_label(display_name: Option<String>) -> String {
     }
 }
 
-fn new_limit(label: String, percent: f64, resets_at: Option<Timestamp>) -> Limit {
-    Limit {
-        label,
-        percent: percent.round() as u32,
-        resets_at,
-    }
+fn percent(raw: f64) -> Option<u32> {
+    (raw.is_finite() && (0.0..=u32::MAX as f64).contains(&raw)).then(|| raw.round() as u32)
 }
 
 #[cfg(test)]
@@ -165,10 +207,27 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
+    #[should_panic(expected = "limit label must be non-empty lowercase ASCII alphanumerics")]
+    fn limit_with_empty_label_is_a_bug() {
+        Limit::new(String::new(), 1, None);
+    }
+
+    #[test]
+    #[should_panic(expected = "limit label must be non-empty lowercase ASCII alphanumerics")]
+    fn limit_with_uppercase_label_is_a_bug() {
+        Limit::new("Fable".to_string(), 1, None);
+    }
+
+    #[test]
+    fn empty_limits_are_none() {
+        assert!(Limits::new(vec![]).is_none());
+    }
+
+    #[test]
     fn fixture_is_normalized_in_order() {
         let limits = parse(include_str!("../tests/fixtures/usage.json")).unwrap();
         assert_eq!(
-            limits,
+            *limits,
             vec![
                 limit("5h", 11, Some("2026-10-13T21:29:59.728003Z")),
                 limit("7d", 38, Some("2026-10-14T22:59:59.728026Z")),
@@ -185,7 +244,7 @@ mod tests {
             {"kind": "weekly_scoped", "percent": 3, "scope": null}
         ]}"#;
         assert_eq!(
-            parse(body).unwrap(),
+            *parse(body).unwrap(),
             vec![
                 limit("fablex", 1, None),
                 limit("scoped", 2, None),
@@ -206,8 +265,24 @@ mod tests {
             format!("{{{windows}}}"),
             format!(r#"{{"limits": [{{"kind": "monthly", "percent": 5}}], {windows}}}"#),
         ] {
-            assert_eq!(parse(&body).unwrap(), expected);
+            assert_eq!(*parse(&body).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn invalid_percents_are_skipped_and_valid_ones_rounded() {
+        let body = r#"{"limits": [
+            {"kind": "session", "percent": -1.0},
+            {"kind": "session", "percent": 1e20},
+            {"kind": "weekly_all", "percent": 10.6}
+        ]}"#;
+        assert_eq!(*parse(body).unwrap(), vec![limit("7d", 11, None)]);
+    }
+
+    #[test]
+    fn nan_percent_is_not_a_percent() {
+        assert_eq!(percent(f64::NAN), None);
+        assert_eq!(percent(f64::INFINITY), None);
     }
 
     #[test]

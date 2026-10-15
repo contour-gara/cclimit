@@ -5,7 +5,7 @@ mod credentials;
 mod render;
 
 use anyhow::{Result, anyhow};
-use api::Limit;
+use api::Limits;
 use clap::Parser;
 use cli::{Cli, Command};
 use config::Config;
@@ -51,11 +51,11 @@ fn run(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn fetch_limits(config: &Config, credentials: &Credentials) -> Result<Vec<Limit>, Failure> {
+fn fetch_limits(config: &Config, credentials: &Credentials) -> Result<Limits, Failure> {
     if credentials.is_expired(config.now) {
         return Err(Failure::LoginRequired(anyhow!("access token expired")));
     }
-    api::fetch(&config.api_base, &credentials.access_token).map_err(|e| match e {
+    api::fetch(&config.api_base, credentials.access_token()).map_err(|e| match e {
         api::Error::Unauthorized(_) => Failure::LoginRequired(e.into()),
         _ => Failure::Transient(e.into()),
     })
@@ -65,7 +65,7 @@ fn doctor(config: &Config) -> Result<()> {
     let now = config.now;
     let credentials = match credentials::load(config.credentials_file.as_deref()) {
         Ok((source, credentials)) => {
-            let expiry = match credentials.expires_at {
+            let expiry = match credentials.expires_at() {
                 Some(t) if credentials.is_expired(now) => {
                     format!("expired {} ago", render::between(t, now))
                 }
@@ -83,7 +83,7 @@ fn doctor(config: &Config) -> Result<()> {
     };
     let api = match fetch_limits(config, &credentials) {
         Ok(limits) => {
-            let labels: Vec<_> = limits.iter().map(|l| l.label.as_str()).collect();
+            let labels: Vec<_> = limits.iter().map(|l| l.label()).collect();
             format!("HTTP 200, limits {}", labels.join(", "))
         }
         Err(Failure::LoginRequired(e) | Failure::Transient(e)) => format!("{e:#}"),
