@@ -1,6 +1,6 @@
 [tools]
 cargo-release = "1.1.6"
-rust = "1.99.0"
+rust = { version = "1.99.0", components = ["rustfmt", "clippy"] }
 
 [tasks]
 test = "cargo test"
