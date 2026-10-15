@@ -10,8 +10,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
       - name: Check version matches tag
         run: |
           version="$(mise exec -- cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
@@ -38,8 +38,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
       - run: mise exec -- rustup target add ${{ matrix.target }}
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
@@ -62,6 +62,6 @@ jobs:
         run: gh release download "$GITHUB_REF_NAME" -p '*.tar.gz' -R "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: '*.tar.gz'
