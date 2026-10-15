@@ -6,4 +6,7 @@ rust = { version = "1.99.0", components = ["rustfmt", "clippy"] }
 test = "cargo test"
 lint = "cargo fmt --check && cargo clippy --all-targets -- -D warnings"
 live = "cargo test -- --ignored"
-release = "cargo release {{arg(name='level', default='patch')}} --execute"
+
+[tasks.release]
+usage = 'arg "[level]" help="cargo release に渡す版上げの段階か版番号" default="patch"'
+run = "cargo release ${usage_level?} --execute"
